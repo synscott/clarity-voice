@@ -15,8 +15,9 @@ def test_returns_analysis_result():
 
 
 def test_duration_accurate():
+    # 250ms is trimmed from the start during preprocessing
     result = analyze_array(_sine(200.0, 3.0, sr=16000), 16000)
-    assert abs(result.duration - 3.0) < 0.05
+    assert abs(result.duration - 2.75) < 0.05
 
 
 def test_f0_detected_for_sine():

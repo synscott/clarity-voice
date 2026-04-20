@@ -61,14 +61,33 @@ class AnalysisResult:
 
 def analyze_file(path: str) -> AnalysisResult:
     sound = parselmouth.Sound(path)
+    audio = sound.values[0]
+    audio = _preprocess(audio, int(sound.sampling_frequency))
+    sound = parselmouth.Sound(audio, sampling_frequency=sound.sampling_frequency)
     return _analyze_sound(sound)
 
 
 def analyze_array(audio: np.ndarray, sample_rate: int) -> AnalysisResult:
     if audio.ndim > 1:
         audio = audio.mean(axis=-1)
-    sound = parselmouth.Sound(audio.astype(np.float64), sampling_frequency=float(sample_rate))
+    audio = _preprocess(audio.astype(np.float64), sample_rate)
+    sound = parselmouth.Sound(audio, sampling_frequency=float(sample_rate))
     return _analyze_sound(sound)
+
+
+def _preprocess(audio: np.ndarray, sample_rate: int) -> np.ndarray:
+    # Drop the first 250ms — recording-start transients cause spurious pitch spikes
+    trim = int(0.25 * sample_rate)
+    audio = audio[trim:]
+
+    # RMS normalize to -20 dBFS so analysis parameters stay consistent
+    # across different mic gains and room levels
+    rms = np.sqrt(np.mean(audio ** 2))
+    if rms > 1e-9:
+        target_rms = 10 ** (-20.0 / 20.0)
+        audio = np.clip(audio * (target_rms / rms), -1.0, 1.0)
+
+    return audio
 
 
 def _analyze_sound(sound: parselmouth.Sound) -> AnalysisResult:
@@ -84,12 +103,26 @@ def _analyze_sound(sound: parselmouth.Sound) -> AnalysisResult:
 
 
 def _analyze_f0(sound: parselmouth.Sound) -> F0Result:
-    pitch = sound.to_pitch(time_step=0.01, pitch_floor=75.0, pitch_ceiling=600.0)
+    pitch = sound.to_pitch_ac(
+        time_step=0.01,
+        pitch_floor=75.0,
+        pitch_ceiling=600.0,
+        silence_threshold=0.01,
+        voicing_threshold=0.15,
+    )
     times = pitch.xs()
     values = pitch.selected_array["frequency"]  # 0 = unvoiced
 
     voiced_mask = values > 0
     voiced_values = values[voiced_mask]
+
+    # Suppress octave errors: values above 1.75× the median are likely harmonic
+    # doubling artifacts from Praat's autocorrelation method
+    if len(voiced_values) > 0:
+        cutoff = float(np.median(voiced_values)) * 1.75
+        values[(values > 0) & (values > cutoff)] = 0.0
+        voiced_mask = values > 0
+        voiced_values = values[voiced_mask]
     voiced_fraction = voiced_mask.sum() / max(len(values), 1)
 
     if len(voiced_values) > 0:
@@ -166,14 +199,16 @@ def _analyze_intensity(sound: parselmouth.Sound) -> IntensityResult:
 
 def _analyze_speech_rate(sound: parselmouth.Sound, intensity: IntensityResult) -> SpeechRateResult:
     dt = 0.01
-    # 20 dB below mean as silence threshold
-    threshold = intensity.mean_db - 20.0
+    # Estimate noise floor from the quietest 10% of frames, then threshold 10 dB above it.
+    # More robust than mean-based threshold when background noise is present.
+    noise_floor = float(np.percentile(intensity.values, 10))
+    threshold = noise_floor + 3.0
     is_voiced = intensity.values > threshold
 
     voiced_duration = float(np.sum(is_voiced) * dt)
     speech_ratio = voiced_duration / sound.duration if sound.duration > 0 else 0.0
 
-    pause_count, mean_pause = _count_pauses(is_voiced, dt, min_pause=0.15)
+    pause_count, mean_pause = _count_pauses(is_voiced, dt, min_pause=0.5)
 
     return SpeechRateResult(
         total_duration=sound.duration,

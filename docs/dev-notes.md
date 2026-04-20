@@ -12,11 +12,17 @@ Using `to_formant_burg()` with `maximum_formant=5500.0` (appropriate for adult v
 For children's voices this should be raised to ~8000 Hz. Worth exposing as a parameter
 if child voice use cases emerge.
 
-## Silence threshold
+## Silence threshold / speech rate accuracy
 
-Speech rate / pause detection uses `mean_intensity - 20 dB` as the voiced/unvoiced boundary.
-This is heuristic. Could be replaced with a proper voice activity detection approach if
-accuracy becomes a priority.
+Speech rate and pause detection use an intensity-based threshold (10th percentile of intensity
++ 3 dB). This works reasonably in quiet environments but degrades when the noise floor is
+close to speech level (e.g. fan noise), since the dynamic range between noise and speech can
+be as little as 10-15 dB. In those conditions, voiced duration and pause count will be
+underreported.
+
+The right fix is a proper Voice Activity Detection (VAD) algorithm. Candidates for a future
+iteration: WebRTC VAD (via `webrtcvad`), silero-vad, or py-webrtcvad. Until then, the pitch
+data (F0, formants) is reliable and is the primary clinical signal anyway.
 
 ## librosa vs sounddevice
 

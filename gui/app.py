@@ -7,7 +7,7 @@ from tkinter import filedialog, messagebox, ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from core.analysis import analyze_array
-from core.recorder import load_file, record
+from core.recorder import StreamRecorder, load_file
 from core.report import pitch_contour_figure, text_summary
 
 
@@ -18,6 +18,8 @@ class App(tk.Tk):
         self.geometry("1060x700")
         self.minsize(800, 500)
         self._canvas_widget: tk.Widget | None = None
+        self._recording = False
+        self._recorder = StreamRecorder()
         self._build_ui()
         self.after(100, self._set_sash)
 
@@ -41,17 +43,14 @@ class App(tk.Tk):
         ttk.Entry(self._file_row, textvariable=self._filepath, width=55).pack(side="left", padx=(0, 6))
         ttk.Button(self._file_row, text="Browse...", command=self._browse).pack(side="left")
 
-        # Record input row
+        # Mic row (no controls needed — button handles everything)
         self._rec_row = ttk.Frame(ctrl)
         self._rec_row.grid(row=1, column=0, columnspan=6, sticky="ew", pady=6)
-        ttk.Label(self._rec_row, text="Duration (seconds):").pack(side="left")
-        self._duration = tk.DoubleVar(value=10.0)
-        ttk.Spinbox(self._rec_row, from_=1, to=300, increment=1, textvariable=self._duration, width=7).pack(
-            side="left", padx=6
-        )
+        ttk.Label(self._rec_row, text="Press the button to start recording.").pack(side="left")
 
-        # Analyze button + status
-        self._btn = ttk.Button(ctrl, text="Analyze", command=self._run)
+        # Action button + status
+        self._btn_text = tk.StringVar(value="Analyze")
+        self._btn = ttk.Button(ctrl, textvariable=self._btn_text, command=self._run)
         self._btn.grid(row=2, column=0, pady=(4, 0), sticky="w")
         self._status = tk.StringVar(value="Ready.")
         ttk.Label(ctrl, textvariable=self._status, foreground="gray").grid(
@@ -65,15 +64,14 @@ class App(tk.Tk):
         # Output panes
         self._paned = ttk.PanedWindow(self, orient="horizontal")
         self._paned.pack(fill="both", expand=True, padx=12, pady=8)
-        paned = self._paned
 
         # Left: text report
-        left = ttk.Frame(paned)
-        paned.add(left, weight=1)
+        left = ttk.Frame(self._paned)
+        self._paned.add(left, weight=1)
 
         self._report_text = tk.Text(
             left, wrap="word", font=("Courier New", 10), state="disabled",
-            relief="flat", background="#f8f8f8"
+            relief="flat", background="#f8f8f8",
         )
         vsb = ttk.Scrollbar(left, command=self._report_text.yview)
         self._report_text.configure(yscrollcommand=vsb.set)
@@ -82,8 +80,8 @@ class App(tk.Tk):
         ttk.Button(left, text="Copy Report", command=self._copy_report).pack(pady=(4, 0))
 
         # Right: plot
-        self._plot_frame = ttk.Frame(paned, relief="flat")
-        paned.add(self._plot_frame, weight=2)
+        self._plot_frame = ttk.Frame(self._paned, relief="flat")
+        self._paned.add(self._plot_frame, weight=2)
 
     def _set_sash(self) -> None:
         self._paned.sashpos(0, 300)
@@ -91,8 +89,10 @@ class App(tk.Tk):
     def _toggle_mode(self) -> None:
         if self._mode.get() == "file":
             self._file_row.lift()
+            self._btn_text.set("Analyze")
         else:
             self._rec_row.lift()
+            self._btn_text.set("Start Recording")
 
     def _browse(self) -> None:
         path = filedialog.askopenfilename(
@@ -103,35 +103,62 @@ class App(tk.Tk):
             self._filepath.set(path)
 
     def _run(self) -> None:
-        self._btn.state(["disabled"])
-        self._status.set("Working...")
-        threading.Thread(target=self._analyze, daemon=True).start()
-
-    def _analyze(self) -> None:
-        try:
-            if self._mode.get() == "file":
-                path = self._filepath.get().strip()
-                if not path:
-                    self.after(0, lambda: messagebox.showerror("No file", "Please select an audio file."))
-                    return
-                self.after(0, lambda: self._status.set("Loading file..."))
-                audio, sr = load_file(path)
+        if self._mode.get() == "file":
+            self._btn.state(["disabled"])
+            self._status.set("Working...")
+            threading.Thread(target=self._analyze_file, daemon=True).start()
+        else:
+            if not self._recording:
+                self._start_recording()
             else:
-                dur = float(self._duration.get())
-                self.after(0, lambda: self._status.set(f"Recording {dur:.0f}s - speak now..."))
-                audio, sr = record(dur)
+                self._stop_and_analyze()
 
+    def _start_recording(self) -> None:
+        self._recording = True
+        self._btn_text.set("Stop & Analyze")
+        self._status.set("Recording... speak now.")
+        self._recorder.start()
+
+    def _stop_and_analyze(self) -> None:
+        self._recording = False
+        self._btn.state(["disabled"])
+        self._btn_text.set("Start Recording")
+        self._status.set("Analyzing...")
+        threading.Thread(target=self._analyze_stream, daemon=True).start()
+
+    def _analyze_file(self) -> None:
+        try:
+            path = self._filepath.get().strip()
+            if not path:
+                self.after(0, lambda: messagebox.showerror("No file", "Please select an audio file."))
+                return
+            self.after(0, lambda: self._status.set("Loading file..."))
+            audio, sr = load_file(path)
             self.after(0, lambda: self._status.set("Analyzing..."))
-            result = analyze_array(audio, sr)
-            report = text_summary(result)
-            fig = pitch_contour_figure(result)
-            self.after(0, lambda: self._display(report, fig))
+            self._run_analysis(audio, sr)
         except Exception as exc:
             msg = str(exc)
             self.after(0, lambda: messagebox.showerror("Error", msg))
             self.after(0, lambda: self._status.set("Error."))
         finally:
             self.after(0, lambda: self._btn.state(["!disabled"]))
+
+    def _analyze_stream(self) -> None:
+        try:
+            audio, sr = self._recorder.stop()
+            self._run_analysis(audio, sr)
+        except Exception as exc:
+            msg = str(exc)
+            self.after(0, lambda: messagebox.showerror("Error", msg))
+            self.after(0, lambda: self._status.set("Error."))
+        finally:
+            self.after(0, lambda: self._btn.state(["!disabled"]))
+
+    def _run_analysis(self, audio, sr) -> None:
+        result = analyze_array(audio, sr)
+        report = text_summary(result)
+        fig = pitch_contour_figure(result)
+        self.after(0, lambda: self._display(report, fig))
 
     def _display(self, report: str, fig) -> None:
         self._report_text.configure(state="normal")
