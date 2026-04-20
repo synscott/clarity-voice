@@ -1,14 +1,15 @@
 # Clarity
 
-Open-source voice therapy analysis tool. Provides real-time acoustic feedback and structured practice support between clinic sessions.
+Open-source voice therapy analysis tool. Provides acoustic feedback and structured practice support between clinic sessions.
 
 Works for any voice therapy context — gender-affirming, post-surgical, accent modification, or professional coaching.
 
-## Features (MVP)
+## Features
 
-- Microphone recording or audio file input (WAV, MP3)
-- Acoustic analysis: fundamental frequency (F0), formants (F1/F2/F3), intensity, speech rate
-- Text report and pitch contour visualization
+- Start/stop microphone recording or audio file input (WAV, MP3)
+- Acoustic analysis: fundamental frequency (F0), formants (F1/F2/F3), intensity, speech rate and pauses
+- Pitch contour and intensity visualization
+- Copyable text report for use with external AI or notes
 - Fully local — no network calls, no telemetry, no accounts
 
 ## Setup
@@ -27,28 +28,63 @@ pip install -r requirements.txt
 ```
 
 > **Note:** `sounddevice` requires PortAudio on Windows. If the install fails, try `pipwin install sounddevice` or grab the PortAudio binary manually.
+>
+> `librosa` has a large dependency tree — expect a slow first install.
 
 ## Usage
+
+### GUI (default)
+
+```bash
+python main.py
+```
+
+Select **File** to load a WAV or MP3, or **Microphone** to record. Click **Start Recording**, speak, then click **Stop & Analyze**. Results appear in the text pane and plot automatically.
+
+Use **Copy Report** to copy the text output for use with an AI assistant or your own notes.
+
+### CLI
 
 ```bash
 # Analyze an audio file
 python main.py --file recording.wav
 
-# Record from microphone (10 seconds)
+# Record from microphone for a fixed duration
 python main.py --record 10
 
-# Save report and plot
+# Save report and plot to files
 python main.py --file recording.wav --out report.txt --plot contour.png
 ```
+
+## Analysis Output
+
+| Metric | Description |
+|---|---|
+| F0 mean / median | Average pitch in Hz |
+| F0 range | Min to max pitch across voiced frames |
+| F0 std dev | Pitch stability — lower is more consistent |
+| Voiced frames | % of frames where pitch was detected |
+| F1 / F2 / F3 | Mean formant frequencies — resonance proxy |
+| Voiced duration | Time spent above the speech threshold |
+| Pause count | Number of pauses longer than 0.5s |
 
 ## Project Structure
 
 ```
-core/         Analysis logic (Parselmouth/Praat), recorder, report generation
-gui/          GUI layer (not yet implemented)
-tests/        Unit tests for core analysis
-docs/         Development notes
+core/
+  analysis.py   Parselmouth/Praat acoustic analysis
+  recorder.py   Mic recording (fixed duration and start/stop stream)
+  report.py     Text summary and matplotlib visualization
+gui/
+  app.py        Tkinter GUI
+main.py         Entry point — GUI by default, CLI with arguments
+tests/          Unit tests for core analysis
+docs/           Development notes
 ```
+
+## Known Limitations
+
+**Speech rate accuracy** degrades in noisy environments (fan noise, HVAC, etc.) where the dynamic range between background noise and speech is less than ~15 dB. Pitch and formant data remain reliable regardless. See [docs/dev-notes.md](docs/dev-notes.md) for details.
 
 ## Privacy
 
