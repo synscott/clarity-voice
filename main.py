@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Clarity — voice analysis CLI."""
+"""Clarity — voice analysis CLI and GUI entry point."""
 
 import argparse
 import sys
@@ -11,6 +11,11 @@ from core.report import text_summary, pitch_contour_figure, save_figure
 
 
 def main() -> int:
+    if len(sys.argv) == 1:
+        from gui.app import run
+        run()
+        return 0
+
     parser = argparse.ArgumentParser(
         prog="clarity",
         description="Clarity: acoustic voice analysis",
