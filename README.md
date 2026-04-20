@@ -1,8 +1,8 @@
 # Clarity
 
-Open-source voice therapy analysis tool. Provides acoustic feedback and structured practice support between clinic sessions.
+Open-source acoustic voice analysis tool. Provides real-time pitch feedback and detailed acoustic data to support voice practice.
 
-Works for any voice therapy context — gender-affirming, post-surgical, accent modification, or professional coaching.
+Works for any voice goal — pitch training, accent work, professional vocal coaching, or personal development.
 
 ## Features
 

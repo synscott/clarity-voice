@@ -52,7 +52,7 @@ def text_summary(result: AnalysisResult) -> str:
     if sr.pause_count > 0:
         lines.append(f"  Mean pause:      {sr.mean_pause_duration:.2f}s")
     else:
-        lines.append("  Mean pause:      —")
+        lines.append("  Mean pause:      -")
 
     lines.append("")
     return "\n".join(lines)
